@@ -1,0 +1,31 @@
+# StackHost 部署配置 (sub-aggregator, Flask 版)
+# 文档: https://www.stackhost.org/
+# 用法: 推到 GitHub -> StackHost 连接仓库 -> 选择分支 -> 部署
+#
+# 注意: StackHost 要求 runtime 为对象格式, 且不允许 gunicorn 作为启动命令;
+#       平台会注入 PORT 环境变量并据此转发流量, app.py 的 app.run 会读取它。
+
+name: sub-aggregator
+
+runtime:
+  image: python:3.11-slim
+
+commands:
+  package: ""
+  build:
+    - "pip install -r requirements.txt"
+  start: "python app.py"
+
+# 可选: 推送 main 分支时自动触发重新部署
+repository:
+  branch: main
+  auto_deploy: true
+
+healthcheck:
+  path: /health
+  port: "$PORT"
+
+env:
+  PORT: "8080"          # 平台未注入时的兜底端口
+  LOG_LEVEL: INFO
+  # 机密变量(如 ADMIN_TOKEN)请在 StackHost 控制台 Settings -> Environment 中配置, 切勿提交到仓库
