@@ -147,8 +147,9 @@ def _gather_nodes(urls: list[str]) -> tuple[list[dict], int, int]:
 # ---------------------------------------------------------------------------
 @app.route("/")
 def index():
-    """Root landing: a small human-readable page so opening the deployed URL
-    shows something useful instead of a bare JSON blob or 404."""
+    """Root landing: a small human-readable page with a node-input form so
+    users can paste subscription links / node URIs and get their short link
+    and the three client subscription URLs right away."""
     html = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -157,38 +158,78 @@ def index():
 <title>Sub-Aggregator · 订阅聚合器</title>
 <style>
   body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; display: flex; justify-content: center; padding: 40px 16px; }
-  .card { max-width: 680px; width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; }
+  .card { max-width: 720px; width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; }
   h1 { font-size: 22px; margin: 0 0 6px; }
   .ok { color: #4ade80; font-size: 14px; }
   h2 { font-size: 13px; margin: 26px 0 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: .08em; }
-  code { background: #0f172a; padding: 2px 6px; border-radius: 4px; color: #93c5fd; font-size: 13px; word-break: break-all; }
+  textarea { width: 100%; min-height: 120px; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 13px; box-sizing: border-box; font-family: ui-monospace, Consolas, monospace; resize: vertical; }
+  .row { display: flex; gap: 8px; margin-top: 10px; }
+  input[type=password] { flex: 1; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 13px; }
+  button { background: #2563eb; color: #fff; border: 0; border-radius: 8px; padding: 10px 22px; font-size: 14px; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: wait; }
+  .sub-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+  .lbl { flex: 0 0 64px; font-size: 12px; color: #94a3b8; }
+  .sub { flex: 1; background: #0f172a; padding: 8px 10px; border-radius: 6px; color: #93c5fd; font-size: 12px; word-break: break-all; border: 1px solid #334155; }
+  .meta { margin-top: 10px; font-size: 12px; color: #94a3b8; }
+  .err { margin-top: 10px; color: #f87171; font-size: 13px; background: #0f172a; border: 1px solid #7f1d1d; border-radius: 6px; padding: 8px 10px; }
   ul { margin: 0; padding-left: 18px; }
-  li { margin: 8px 0; font-size: 14px; line-height: 1.6; }
-  .foot { margin-top: 28px; font-size: 12px; color: #64748b; border-top: 1px solid #334155; padding-top: 12px; }
+  li { margin: 6px 0; font-size: 13px; line-height: 1.6; }
+  .foot { margin-top: 26px; font-size: 12px; color: #64748b; border-top: 1px solid #334155; padding-top: 12px; }
 </style>
 </head>
 <body>
 <div class="card">
   <h1>Sub-Aggregator 订阅聚合器</h1>
   <div class="ok">● 服务运行正常</div>
-  <h2>创建订阅短链</h2>
+  <h2>输入订阅源</h2>
+  <textarea id="urls" placeholder="每行一个：订阅链接 或 节点链接
+支持：vless:// vmess:// trojan:// ss:// hysteria2:// tuic:// anytls://
+也支持直接粘贴 base64 编码的订阅内容"></textarea>
+  <div class="row">
+    <input type="password" id="token" placeholder="Admin Token（服务端设置了才需要填）" autocomplete="off">
+    <button id="btn" onclick="create()">生成短链</button>
+  </div>
+  <div id="result"></div>
+  <h2>使用说明</h2>
   <ul>
-    <li><code>POST /create_short</code>，body 传 <code>{"urls": ["订阅链接或节点"]}</code>，需带 <code>X-Admin-Token</code> 请求头</li>
-    <li>返回 <code>short_url</code> 后即可用下方三种格式拉取</li>
+    <li>粘贴订阅链接或节点后点「生成短链」，一次生成，三种客户端通用</li>
+    <li>v2rayN / Clash / sing-box(Karing) 填对应订阅地址即可</li>
+    <li>短链 30 天有效，过期后重新生成即可</li>
   </ul>
-  <h2>订阅输出</h2>
-  <ul>
-    <li>v2rayN：<code>GET /s/&lt;code&gt;</code></li>
-    <li>Clash：<code>GET /s/&lt;code&gt;?type=clash</code></li>
-    <li>sing-box (Karing)：<code>GET /s/&lt;code&gt;?type=singbox</code></li>
-  </ul>
-  <h2>管理接口</h2>
-  <ul>
-    <li><code>POST /admin/purge_expired</code> — 手动清理过期短链</li>
-    <li><code>POST /admin/recheck/&lt;code&gt;</code> — 重新抓取并刷新某短链</li>
-  </ul>
-  <div class="foot">健康检查：<code>GET /health</code> · 详细文档见仓库 README.md</div>
+  <div class="foot">健康检查：<code>/health</code> · 管理接口见仓库 README.md</div>
 </div>
+<script>
+async function create() {
+  var urls = document.getElementById('urls').value.split('\\n').map(function(s){return s.trim()}).filter(Boolean);
+  if (!urls.length) { alert('请先输入订阅链接或节点'); return; }
+  var btn = document.getElementById('btn');
+  btn.disabled = true; btn.textContent = '生成中…';
+  var token = document.getElementById('token').value.trim();
+  var headers = {'Content-Type': 'application/json'};
+  if (token) headers['X-Admin-Token'] = token;
+  var box = document.getElementById('result');
+  try {
+    var r = await fetch('/create_short', {method: 'POST', headers: headers, body: JSON.stringify({urls: urls, check_alive: false})});
+    var j = await r.json();
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    var base = location.origin;
+    box.innerHTML =
+      '<h2>生成成功</h2>' +
+      '<div class="sub-row"><div class="lbl">v2rayN</div><code class="sub">' + base + j.short_url + '</code></div>' +
+      '<div class="sub-row"><div class="lbl">Clash</div><code class="sub">' + base + j.short_url + '?type=clash</code></div>' +
+      '<div class="sub-row"><div class="lbl">sing-box</div><code class="sub">' + base + j.short_url + '?type=singbox</code></div>' +
+      '<div class="meta">节点 ' + j.nodes + ' 个 · 解析跳过 ' + j.skipped + ' · 去重 ' + j.deduped + (j.dead != null ? ' · 失效 ' + j.dead : '') + ' · 有效期 ' + j.expires_in_days + ' 天</div>';
+  } catch (e) {
+    box.innerHTML = '';
+    var err = document.createElement('div');
+    err.className = 'err';
+    err.textContent = '失败：' + e.message;
+    box.appendChild(err);
+  } finally {
+    btn.disabled = false; btn.textContent = '生成短链';
+  }
+}
+</script>
 </body>
 </html>"""
     return Response(html, mimetype="text/html; charset=utf-8")
