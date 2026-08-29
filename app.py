@@ -147,18 +147,51 @@ def _gather_nodes(urls: list[str]) -> tuple[list[dict], int, int]:
 # ---------------------------------------------------------------------------
 @app.route("/")
 def index():
-    """Root landing so opening the deployed URL shows something useful
-    instead of a bare 404."""
-    return jsonify({
-        "service": "sub-aggregator",
-        "status": "ok",
-        "endpoints": {
-            "create_short": "POST /create_short",
-            "subscription": "GET /s/<code>?type=v2rayn|clash|singbox",
-            "health": "GET /health",
-            "admin": "POST /admin/purge_expired | POST /admin/recheck/<code>",
-        },
-    })
+    """Root landing: a small human-readable page so opening the deployed URL
+    shows something useful instead of a bare JSON blob or 404."""
+    html = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sub-Aggregator · 订阅聚合器</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; display: flex; justify-content: center; padding: 40px 16px; }
+  .card { max-width: 680px; width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .ok { color: #4ade80; font-size: 14px; }
+  h2 { font-size: 13px; margin: 26px 0 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: .08em; }
+  code { background: #0f172a; padding: 2px 6px; border-radius: 4px; color: #93c5fd; font-size: 13px; word-break: break-all; }
+  ul { margin: 0; padding-left: 18px; }
+  li { margin: 8px 0; font-size: 14px; line-height: 1.6; }
+  .foot { margin-top: 28px; font-size: 12px; color: #64748b; border-top: 1px solid #334155; padding-top: 12px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Sub-Aggregator 订阅聚合器</h1>
+  <div class="ok">● 服务运行正常</div>
+  <h2>创建订阅短链</h2>
+  <ul>
+    <li><code>POST /create_short</code>，body 传 <code>{"urls": ["订阅链接或节点"]}</code>，需带 <code>X-Admin-Token</code> 请求头</li>
+    <li>返回 <code>short_url</code> 后即可用下方三种格式拉取</li>
+  </ul>
+  <h2>订阅输出</h2>
+  <ul>
+    <li>v2rayN：<code>GET /s/&lt;code&gt;</code></li>
+    <li>Clash：<code>GET /s/&lt;code&gt;?type=clash</code></li>
+    <li>sing-box (Karing)：<code>GET /s/&lt;code&gt;?type=singbox</code></li>
+  </ul>
+  <h2>管理接口</h2>
+  <ul>
+    <li><code>POST /admin/purge_expired</code> — 手动清理过期短链</li>
+    <li><code>POST /admin/recheck/&lt;code&gt;</code> — 重新抓取并刷新某短链</li>
+  </ul>
+  <div class="foot">健康检查：<code>GET /health</code> · 详细文档见仓库 README.md</div>
+</div>
+</body>
+</html>"""
+    return Response(html, mimetype="text/html; charset=utf-8")
 
 
 @app.route("/health")
