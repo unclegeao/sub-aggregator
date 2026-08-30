@@ -201,7 +201,7 @@ def index():
 <script>
 function subRow(lbl, url) {
   return '<div class="sub-row"><div class="lbl">' + lbl + '</div><code class="sub">' + url + '</code>' +
-         '<button class="cpy" onclick="copyText(\'' + url + '\', this)">复制</button></div>';
+         '<button class="cpy" onclick="copyText(this.previousElementSibling.textContent.trim(), this)">复制</button></div>';
 }
 function copyText(text, btn) {
   function done() {
