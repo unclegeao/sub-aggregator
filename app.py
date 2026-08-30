@@ -167,6 +167,8 @@ def index():
   input[type=password] { flex: 1; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 13px; }
   button { background: #2563eb; color: #fff; border: 0; border-radius: 8px; padding: 10px 22px; font-size: 14px; cursor: pointer; }
   button:disabled { opacity: .6; cursor: wait; }
+  .cpy { flex: 0 0 auto; background: #334155; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; }
+  .cpy:hover { background: #475569; }
   .sub-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
   .lbl { flex: 0 0 64px; font-size: 12px; color: #94a3b8; }
   .sub { flex: 1; background: #0f172a; padding: 8px 10px; border-radius: 6px; color: #93c5fd; font-size: 12px; word-break: break-all; border: 1px solid #334155; }
@@ -174,7 +176,6 @@ def index():
   .err { margin-top: 10px; color: #f87171; font-size: 13px; background: #0f172a; border: 1px solid #7f1d1d; border-radius: 6px; padding: 8px 10px; }
   ul { margin: 0; padding-left: 18px; }
   li { margin: 6px 0; font-size: 13px; line-height: 1.6; }
-  .foot { margin-top: 26px; font-size: 12px; color: #64748b; border-top: 1px solid #334155; padding-top: 12px; }
 </style>
 </head>
 <body>
@@ -196,9 +197,35 @@ def index():
     <li>v2rayN / Clash / sing-box(Karing) 填对应订阅地址即可</li>
     <li>短链 30 天有效，过期后重新生成即可</li>
   </ul>
-  <div class="foot">健康检查：<code>/health</code> · 管理接口见仓库 README.md</div>
 </div>
 <script>
+function subRow(lbl, url) {
+  return '<div class="sub-row"><div class="lbl">' + lbl + '</div><code class="sub">' + url + '</code>' +
+         '<button class="cpy" onclick="copyText(\'' + url + '\', this)">复制</button></div>';
+}
+function copyText(text, btn) {
+  function done() {
+    var old = btn.textContent;
+    btn.textContent = '已复制 ✓';
+    setTimeout(function () { btn.textContent = old; }, 1500);
+  }
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done).catch(function () { fallbackCopy(text, btn, done); });
+  } else {
+    fallbackCopy(text, btn, done);
+  }
+}
+function fallbackCopy(text, btn, done) {
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(ta);
+  done();
+}
 async function create() {
   var urls = document.getElementById('urls').value.split('\\n').map(function(s){return s.trim()}).filter(Boolean);
   if (!urls.length) { alert('请先输入订阅链接或节点'); return; }
@@ -215,9 +242,9 @@ async function create() {
     var base = location.origin;
     box.innerHTML =
       '<h2>生成成功</h2>' +
-      '<div class="sub-row"><div class="lbl">v2rayN</div><code class="sub">' + base + j.short_url + '</code></div>' +
-      '<div class="sub-row"><div class="lbl">Clash</div><code class="sub">' + base + j.short_url + '?type=clash</code></div>' +
-      '<div class="sub-row"><div class="lbl">sing-box</div><code class="sub">' + base + j.short_url + '?type=singbox</code></div>' +
+      subRow('v2rayN', base + j.short_url) +
+      subRow('Clash', base + j.short_url + '?type=clash') +
+      subRow('sing-box', base + j.short_url + '?type=singbox') +
       '<div class="meta">节点 ' + j.nodes + ' 个 · 解析跳过 ' + j.skipped + ' · 去重 ' + j.deduped + (j.dead != null ? ' · 失效 ' + j.dead : '') + ' · 有效期 ' + j.expires_in_days + ' 天</div>';
   } catch (e) {
     box.innerHTML = '';
