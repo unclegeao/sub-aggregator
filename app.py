@@ -192,6 +192,19 @@ def index():
     <button id="btn" onclick="create()">生成短链</button>
   </div>
   <div id="result"></div>
+  <h2>优选订阅（Argo 多地址生成）</h2>
+  <textarea id="plink" placeholder="粘贴单个节点链接：vless:// vmess:// trojan:// ss://
+（Argo / 任意 CF 隧道节点 → 批量替换成优选域名）"></textarea>
+  <div class="row">
+    <select id="pfmt" style="flex:1;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:8px;padding:10px;font-size:13px;">
+      <option value="v2rayn">v2rayN (base64)</option>
+      <option value="clash">Clash (YAML)</option>
+      <option value="singbox">sing-box (JSON)</option>
+    </select>
+    <input type="text" id="pport" placeholder="端口(可选,如8443)" style="flex:0 0 120px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:8px;padding:10px;font-size:13px;">
+    <button id="pbtn" onclick="pref()">生成优选</button>
+  </div>
+  <div id="presult"></div>
   <h2>使用说明</h2>
   <ul>
     <li>粘贴订阅链接或节点后点「生成短链」，一次生成，三种客户端通用</li>
@@ -255,6 +268,42 @@ async function create() {
     box.appendChild(err);
   } finally {
     btn.disabled = false; btn.textContent = '生成短链';
+  }
+}
+function escHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+async function pref() {
+  var link = document.getElementById('plink').value.trim();
+  if (!link) { alert('请先粘贴节点链接'); return; }
+  var btn = document.getElementById('pbtn');
+  btn.disabled = true; btn.textContent = '生成中…';
+  var type = document.getElementById('pfmt').value;
+  var port = document.getElementById('pport').value.trim();
+  var url = '/preferred?link=' + encodeURIComponent(link) + '&type=' + type + (port ? '&port=' + encodeURIComponent(port) : '');
+  var box = document.getElementById('presult');
+  try {
+    var r = await fetch(url);
+    if (!r.ok) {
+      var j = await r.json().catch(function () { return {}; });
+      throw new Error(j.error || ('HTTP ' + r.status));
+    }
+    var text = await r.text();
+    var show = text.length > 3000 ? text.slice(0, 3000) + '…' : text;
+    box.innerHTML =
+      '<div class="sub-row"><div class="lbl">订阅URL</div><code class="sub">' + escHtml(url) + '</code>' +
+      '<button class="cpy" onclick="copyText(this.previousElementSibling.textContent.trim(), this)">复制URL</button></div>' +
+      '<div class="sub-row"><div class="lbl">内容</div><code class="sub" style="max-height:160px;overflow:auto;white-space:pre-wrap;">' + escHtml(show) + '</code>' +
+      '<button class="cpy" onclick="copyText(this.previousElementSibling.textContent.trim(), this)">复制内容</button></div>' +
+      '<div class="meta">' + (text.length > 3000 ? '内容过长已截断显示，订阅 URL 可直接填进客户端' : '') + '（节点个数见内容）</div>';
+  } catch (e) {
+    box.innerHTML = '';
+    var err = document.createElement('div');
+    err.className = 'err';
+    err.textContent = '失败：' + e.message;
+    box.appendChild(err);
+  } finally {
+    btn.disabled = false; btn.textContent = '生成优选';
   }
 }
 </script>
