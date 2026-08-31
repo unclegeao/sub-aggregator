@@ -280,22 +280,19 @@ async function pref() {
   btn.disabled = true; btn.textContent = '生成中…';
   var type = document.getElementById('pfmt').value;
   var port = document.getElementById('pport').value.trim();
-  var url = '/preferred?link=' + encodeURIComponent(link) + '&type=' + type + (port ? '&port=' + encodeURIComponent(port) : '');
+  var url = '/preferred?link=' + encodeURIComponent(link) + '&type=' + type + '&short=1' + (port ? '&port=' + encodeURIComponent(port) : '');
   var box = document.getElementById('presult');
   try {
     var r = await fetch(url);
-    if (!r.ok) {
-      var j = await r.json().catch(function () { return {}; });
-      throw new Error(j.error || ('HTTP ' + r.status));
-    }
-    var text = await r.text();
-    var show = text.length > 3000 ? text.slice(0, 3000) + '…' : text;
-    box.innerHTML =
-      '<div class="sub-row"><div class="lbl">订阅URL</div><code class="sub">' + escHtml(url) + '</code>' +
-      '<button class="cpy" onclick="copyText(this.previousElementSibling.textContent.trim(), this)">复制URL</button></div>' +
-      '<div class="sub-row"><div class="lbl">内容</div><code class="sub" style="max-height:160px;overflow:auto;white-space:pre-wrap;">' + escHtml(show) + '</code>' +
-      '<button class="cpy" onclick="copyText(this.previousElementSibling.textContent.trim(), this)">复制内容</button></div>' +
-      '<div class="meta">' + (text.length > 3000 ? '内容过长已截断显示，订阅 URL 可直接填进客户端' : '') + '（节点个数见内容）</div>';
+    var j = await r.json().catch(function () { return {}; });
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    var base = location.origin;
+    ['v2rayn', 'clash', 'singbox'].forEach(function (f) {
+      var u = base + j.short_url + (f === 'v2rayn' ? '' : '?type=' + f);
+      box.innerHTML += '<div class="sub-row"><div class="lbl">' + f + '</div><code class="sub">' + escHtml(u) + '</code>' +
+        '<button class="cpy" onclick="copyText(this.previousElementSibling.textContent.trim(), this)">复制</button></div>';
+    });
+    box.innerHTML += '<div class="meta">短链已生成 · ' + j.nodes + ' 个优选节点 · 有效期 ' + j.expires_in_days + ' 天 · 直接填进客户端订阅地址即可</div>';
   } catch (e) {
     box.innerHTML = '';
     var err = document.createElement('div');
@@ -309,7 +306,7 @@ async function pref() {
 </script>
 </body>
 </html>"""
-    return Response(html, mimetype="text/html; charset=utf-8")
+    return Response(html, mimetype="text/html")
 
 
 @app.route("/health")
@@ -382,19 +379,25 @@ def get_subscription(code):
 
     nodes = storage.get_cached_nodes(code, CACHE_TTL_SECONDS)
     if nodes is None:
-        nodes, skipped, dedup_removed = _gather_nodes(link["urls"])
-        if skipped or dedup_removed:
-            logger.info("refresh for %s: %d parse-skipped, %d deduped", code, skipped, dedup_removed)
+        meta = (link.get("meta") or {})
+        if meta.get("preferred"):
+            # 优选短链：重新解析原始链接并展开
+            base_nodes, skipped, _ = _gather_nodes(link["urls"])
+            nodes = preferred.expand_with_options(base_nodes, meta.get("port"), meta.get("max", 0))
+        else:
+            nodes, skipped, dedup_removed = _gather_nodes(link["urls"])
+        if skipped or (not meta.get("preferred") and dedup_removed):
+            logger.info("refresh for %s: %d parse-skipped", code, skipped)
         storage.set_cached_nodes(code, nodes)
 
     fmt = request.args.get("type", "v2rayn")
     try:
         if fmt == "clash":
-            return Response(to_clash(nodes), mimetype="text/yaml; charset=utf-8")
+            return Response(to_clash(nodes), mimetype="text/yaml")
         elif fmt == "singbox":
-            return Response(to_singbox(nodes), mimetype="application/json; charset=utf-8")
+            return Response(to_singbox(nodes), mimetype="application/json")
         else:
-            return Response(to_v2rayn(nodes), mimetype="text/plain; charset=utf-8")
+            return Response(to_v2rayn(nodes), mimetype="text/plain")
     except Exception:
         logger.exception("failed to render subscription for %s", code)
         abort(500, description="failed to render subscription")
@@ -406,19 +409,20 @@ def preferred_sub():
     """优选订阅：把一个 Argo 节点/订阅源展开成多个 CF 优选地址变体。
 
     参数:
-      link - 单个节点链接(vmess/vless/trojan/ss...) 或订阅源URL
-      type - v2rayn(默认) / clash / singbox
-      port - 可选，覆盖端口（如 8443）
-      max  - 可选，最多生成几个优选变体（默认全部）
+      link  - 单个节点链接(vmess/vless/trojan/ss...) 或订阅源URL
+      type  - v2rayn(默认) / clash / singbox
+      port  - 可选，覆盖端口（如 8443）
+      max   - 可选，最多生成几个优选变体（默认全部）
+      short - 传 1 时生成 /s/短码 短链并返回 JSON（不再直接输出订阅）
     示例:
       /preferred?link=vless://...&type=v2rayn
-      /preferred?link=vmess://...&type=clash&port=8443&max=10
+      /preferred?link=vmess://...&short=1&port=8443&max=10
     """
     link = (request.args.get("link") or "").strip()
     if not link:
         return Response(
-            "<h3>优选订阅生成器</h3>用法: <code>/preferred?link=&lt;节点链接&gt;&amp;type=v2rayn|clash|singbox&amp;port=8443&amp;max=10</code>",
-            mimetype="text/html; charset=utf-8")
+            "<h3>优选订阅生成器</h3>用法: <code>/preferred?link=&lt;节点链接&gt;&amp;type=v2rayn|clash|singbox&amp;port=8443&amp;max=10&amp;short=1</code>",
+            mimetype="text/html")
     nodes, skipped = _extract_nodes_from_source(link)
     if not nodes:
         abort(400, description="未能从链接解析出任何节点")
@@ -430,16 +434,37 @@ def preferred_sub():
         max_n = int(request.args["max"]) if request.args.get("max") else 0
     except ValueError:
         max_n = 0
+
+    # 短链模式：展开后的节点写入缓存 + 记录 meta，返回 /s/短码
+    if request.args.get("short") == "1":
+        expanded = preferred.expand_with_options(nodes, port, max_n)
+        if not expanded:
+            abort(400, description="展开后没有可用节点")
+        code = _gen_code()
+        while storage.get_short_link(code) is not None:
+            code = _gen_code()
+        ttl_seconds = SHORT_LINK_TTL_DAYS * 86400
+        storage.create_short_link(
+            code, [link], ttl_seconds, node_count=len(expanded),
+            meta={"preferred": True, "port": port, "max": max_n})
+        storage.set_cached_nodes(code, expanded)
+        logger.info("created preferred short link %s with %d nodes", code, len(expanded))
+        return jsonify({
+            "short_url": f"/s/{code}",
+            "nodes": len(expanded),
+            "expires_in_days": SHORT_LINK_TTL_DAYS,
+        })
+
     try:
         fmt = request.args.get("type", "v2rayn")
         if fmt == "clash":
             body = preferred.render(nodes, "clash", port=port, max_nodes=max_n)
-            return Response(body, mimetype="text/yaml; charset=utf-8")
+            return Response(body, mimetype="text/yaml")
         if fmt == "singbox":
             body = preferred.render(nodes, "singbox", port=port, max_nodes=max_n)
-            return Response(body, mimetype="application/json; charset=utf-8")
+            return Response(body, mimetype="application/json")
         body = preferred.render(nodes, "v2rayn", port=port, max_nodes=max_n)
-        return Response(body, mimetype="text/plain; charset=utf-8")
+        return Response(body, mimetype="text/plain")
     except Exception:
         logger.exception("failed to render preferred sub for %s", link[:40])
         abort(500, description="failed to render preferred subscription")

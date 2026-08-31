@@ -44,6 +44,13 @@ CREATE INDEX IF NOT EXISTS idx_expires_at ON short_links(expires_at);
 """
 
 
+def _ensure_meta_column(conn):
+    """Add the `meta` column if it's missing (for DBs created before it existed)."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(short_links)").fetchall()]
+    if "meta" not in cols:
+        conn.execute("ALTER TABLE short_links ADD COLUMN meta TEXT")
+
+
 def _get_conn():
     """One connection per thread; gunicorn sync workers are single-threaded
     per process so this keeps things simple and safe."""
@@ -52,6 +59,7 @@ def _get_conn():
         conn.execute("PRAGMA journal_mode=WAL")  # allows concurrent readers + one writer
         conn.execute("PRAGMA foreign_keys=ON")
         conn.executescript(SCHEMA)
+        _ensure_meta_column(conn)
         _local.conn = conn
     return _local.conn
 
@@ -68,25 +76,27 @@ def _tx():
         raise
 
 
-def create_short_link(code: str, urls: list[str], ttl_seconds: int, node_count: int = 0):
+def create_short_link(code: str, urls: list[str], ttl_seconds: int, node_count: int = 0,
+                      meta: dict | None = None):
     now = time.time()
     with _tx() as conn:
         conn.execute(
-            "INSERT INTO short_links (code, urls, created_at, expires_at, node_count) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (code, json.dumps(urls), now, now + ttl_seconds, node_count),
+            "INSERT INTO short_links (code, urls, created_at, expires_at, node_count, meta) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (code, json.dumps(urls), now, now + ttl_seconds, node_count,
+             json.dumps(meta) if meta else None),
         )
 
 
 def get_short_link(code: str) -> dict | None:
     conn = _get_conn()
     row = conn.execute(
-        "SELECT code, urls, created_at, expires_at, node_count FROM short_links WHERE code = ?",
+        "SELECT code, urls, created_at, expires_at, node_count, meta FROM short_links WHERE code = ?",
         (code,),
     ).fetchone()
     if not row:
         return None
-    code_, urls_json, created_at, expires_at, node_count = row
+    code_, urls_json, created_at, expires_at, node_count, meta_json = row
     if expires_at < time.time():
         delete_short_link(code_)
         return None
@@ -96,6 +106,7 @@ def get_short_link(code: str) -> dict | None:
         "created_at": created_at,
         "expires_at": expires_at,
         "node_count": node_count,
+        "meta": json.loads(meta_json) if meta_json else None,
     }
 
 

@@ -64,6 +64,15 @@ def expand_nodes(nodes: list[dict], domains: list[str], port: int | None = None)
     return out
 
 
+def expand_with_options(nodes: list[dict], port: int | None = None,
+                        max_nodes: int = 0, domains: list[str] | None = None) -> list[dict]:
+    """按 port/max 展开：max 限制每个节点生成的变体数（0=全部）。"""
+    doms = domains if domains is not None else load_domains()
+    if max_nodes and max_nodes > 0:
+        doms = doms[:max_nodes]
+    return expand_nodes(nodes, doms, port)
+
+
 def render(nodes: list[dict], fmt: str = "v2rayn", domains: list[str] | None = None,
            port: int | None = None, max_nodes: int = 0) -> str:
     """展开优选变体并按 fmt 渲染。fmt: v2rayn / clash / singbox
@@ -71,10 +80,7 @@ def render(nodes: list[dict], fmt: str = "v2rayn", domains: list[str] | None = N
     max_nodes: 每个节点最多生成几个变体（0=全部）
     """
     from converters import to_v2rayn, to_clash, to_singbox
-    doms = domains if domains is not None else load_domains()
-    if max_nodes and max_nodes > 0:
-        doms = doms[:max_nodes]
-    expanded = expand_nodes(nodes, doms, port)
+    expanded = expand_with_options(nodes, port, max_nodes, domains)
     if fmt == "clash":
         return to_clash(expanded)
     if fmt == "singbox":
