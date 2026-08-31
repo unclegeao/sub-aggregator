@@ -38,6 +38,7 @@ from converters import to_v2rayn, to_clash, to_singbox
 from security import safe_fetch, SSRFBlocked
 from dedup import dedup_nodes
 from liveness import check_nodes_alive, DEFAULT_TIMEOUT as LIVENESS_TIMEOUT_DEFAULT
+import preferred
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -348,6 +349,51 @@ def get_subscription(code):
     except Exception:
         logger.exception("failed to render subscription for %s", code)
         abort(500, description="failed to render subscription")
+
+
+@app.route("/preferred")
+@limiter.limit("120 per minute")
+def preferred_sub():
+    """优选订阅：把一个 Argo 节点/订阅源展开成多个 CF 优选地址变体。
+
+    参数:
+      link - 单个节点链接(vmess/vless/trojan/ss...) 或订阅源URL
+      type - v2rayn(默认) / clash / singbox
+      port - 可选，覆盖端口（如 8443）
+      max  - 可选，最多生成几个优选变体（默认全部）
+    示例:
+      /preferred?link=vless://...&type=v2rayn
+      /preferred?link=vmess://...&type=clash&port=8443&max=10
+    """
+    link = (request.args.get("link") or "").strip()
+    if not link:
+        return Response(
+            "<h3>优选订阅生成器</h3>用法: <code>/preferred?link=&lt;节点链接&gt;&amp;type=v2rayn|clash|singbox&amp;port=8443&amp;max=10</code>",
+            mimetype="text/html; charset=utf-8")
+    nodes, skipped = _extract_nodes_from_source(link)
+    if not nodes:
+        abort(400, description="未能从链接解析出任何节点")
+    try:
+        port = int(request.args["port"]) if request.args.get("port") else None
+    except ValueError:
+        port = None
+    try:
+        max_n = int(request.args["max"]) if request.args.get("max") else 0
+    except ValueError:
+        max_n = 0
+    try:
+        fmt = request.args.get("type", "v2rayn")
+        if fmt == "clash":
+            body = preferred.render(nodes, "clash", port=port, max_nodes=max_n)
+            return Response(body, mimetype="text/yaml; charset=utf-8")
+        if fmt == "singbox":
+            body = preferred.render(nodes, "singbox", port=port, max_nodes=max_n)
+            return Response(body, mimetype="application/json; charset=utf-8")
+        body = preferred.render(nodes, "v2rayn", port=port, max_nodes=max_n)
+        return Response(body, mimetype="text/plain; charset=utf-8")
+    except Exception:
+        logger.exception("failed to render preferred sub for %s", link[:40])
+        abort(500, description="failed to render preferred subscription")
 
 
 @app.route("/admin/purge_expired", methods=["POST"])

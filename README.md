@@ -121,6 +121,31 @@ security.py     SSRF 防护（DNS 解析校验 + IP 锁定 + 重定向逐跳校�
 10. **地区自动分组**：Clash/sing-box 输出从平铺列表变成 PROXY → 地区 → 具体节点 的三层结构，客户端里选起来更方便。
 11. **延迟测速**：存活检测顺带记录 TCP 连接耗时，默认按延迟排序，可选把延迟标进节点名称。
 
+## 优选订阅生成器（/preferred）
+
+把一个 Argo 节点 / 订阅源展开成多个 **CF 优选地址变体**：只替换 `server` 为不同的优选域名/IP，
+其余（uuid / sni / host / path / port）保持不变，客户端即可逐个测速挑最快的。
+
+```
+GET /preferred?link=<节点链接或订阅源>&type=v2rayn|clash|singbox&port=<端口>&max=<数量>
+```
+
+- `link`  必填。单个节点链接（vless:// vmess:// trojan:// ss:// …）或订阅源 URL
+- `type`  输出格式，默认 `v2rayn`
+- `port`  可选，覆盖所有变体的端口（例如 Argo 隧道常用 8443）
+- `max`   可选，每个节点最多生成几个变体（默认全部）
+
+示例：
+
+```
+/preferred?link=vmess://xxx&type=v2rayn&port=8443
+/preferred?link=vmess://xxx&type=clash&max=10
+/preferred?link=vmess://xxx&type=singbox
+```
+
+把返回内容粘贴进 v2rayN「从剪贴板导入订阅」，或用 `?type=` 切换 Clash / sing-box。
+优选域名清单来自项目内 `web_domains.txt`（每行一个，`#` 后为备注/IP，可自行增删）。
+
 ## 已知局限（诚实说明）
 
 - 协议解析是自行实现的，没有复用 subconverter 等项目多年积累的边界情况处理，如果遇到某些机场的非标准参数格式，解析可能失败（会被计入 `skipped`，不会静默出错）。
