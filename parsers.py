@@ -175,6 +175,12 @@ def parse_ss(uri: str) -> dict | None:
             method, _, password = userinfo.partition(":")
             hostport = hostport.split("?")[0].split("/")[0]
             host, _, port = hostport.rpartition(":")
+            # urlparse() strips IPv6 brackets for every other protocol, so strip
+            # them here too. Leaving "[2001:db8::1]" in node["server"] corrupts
+            # the Clash/sing-box output (both want a bare address) and makes
+            # liveness.py's socket.create_connection fail.
+            if host.startswith("[") and host.endswith("]"):
+                host = host[1:-1]
         else:
             # Legacy: entire method:pass@host:port is base64-encoded
             decoded = _b64_decode(body)
