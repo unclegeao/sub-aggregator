@@ -236,6 +236,14 @@ def parse_hysteria2(uri: str) -> dict | None:
             or ""
         )
 
+        # ALPN: hysteria2 needs h3 (HTTP/3 over QUIC). A server that pins
+        # ALPN=h3 refuses the handshake when the client doesn't offer it, so
+        # dropping it = guaranteed timeout. Keep it (default h3).
+        alpn = qs.get("alpn", "") or "h3"
+
+        # security=tls just declares TLS; keep it for fidelity (default tls).
+        security = qs.get("security", "") or "tls"
+
         return {
             "type": "hysteria2",
             "name": name,
@@ -247,6 +255,8 @@ def parse_hysteria2(uri: str) -> dict | None:
             "obfs": obfs,
             "obfs_password": qs.get("obfs-password", "") if obfs else "",
             "pinSHA256": pin_sha256,
+            "alpn": alpn,
+            "security": security,
         }
     except Exception:
         logger.debug("failed to parse hysteria2 uri", exc_info=True)
