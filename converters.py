@@ -10,6 +10,8 @@ output formats the clients expect:
 
 import base64
 import json
+from urllib.parse import quote
+
 import yaml
 
 from regions import group_by_region
@@ -55,7 +57,7 @@ def _node_to_uri(node: dict) -> str:
         if node.get("path"):
             parts.append(f"path={node['path']}")
         qs = ("?" + "&".join(parts)) if parts else ""
-        return f"trojan://{node['password']}@{node['server']}:{node['port']}{qs}#{name}"
+        return f"trojan://{quote(node['password'], safe='')}@{node['server']}:{node['port']}{qs}#{name}"
     if t == "ss":
         userinfo = base64.urlsafe_b64encode(
             f"{node['cipher']}:{node['password']}".encode()
@@ -68,11 +70,17 @@ def _node_to_uri(node: dict) -> str:
         if node.get("obfs"):
             parts.append(f"obfs={node['obfs']}")
         if node.get("obfs_password"):
-            parts.append(f"obfs-password={node['obfs_password']}")
+            # obfs-password is a random base64-alphabet string: percent-encode
+            # it so '+' / '=' survive the URI round-trip (parsers.py unquotes).
+            parts.append(f"obfs-password={quote(node['obfs_password'], safe='')}")
         if node.get("insecure"):
             parts.append("insecure=1")
         qs = ("?" + "&".join(parts)) if parts else ""
-        return f"hysteria2://{node['password']}@{node['server']}:{node['port']}{qs}#{name}"
+        # password is already percent-decoded (parsers.py) -> re-encode it for
+        # userinfo so reserved chars ('@', '#', '/', '+', '=') can't corrupt
+        # the URI structure.
+        pw = quote(node["password"], safe="")
+        return f"hysteria2://{pw}@{node['server']}:{node['port']}{qs}#{name}"
     if t == "tuic":
         parts = []
         if node.get("sni"):
@@ -86,7 +94,7 @@ def _node_to_uri(node: dict) -> str:
         if node.get("allow_insecure"):
             parts.append("allow_insecure=1")
         qs = ("?" + "&".join(parts)) if parts else ""
-        return f"tuic://{node['uuid']}:{node['password']}@{node['server']}:{node['port']}{qs}#{name}"
+        return f"tuic://{node['uuid']}:{quote(node['password'], safe='')}@{node['server']}:{node['port']}{qs}#{name}"
     if t == "anytls":
         parts = []
         if node.get("sni"):
@@ -94,7 +102,7 @@ def _node_to_uri(node: dict) -> str:
         if node.get("insecure"):
             parts.append("insecure=1")
         qs = ("?" + "&".join(parts)) if parts else ""
-        return f"anytls://{node['password']}@{node['server']}:{node['port']}{qs}#{name}"
+        return f"anytls://{quote(node['password'], safe='')}@{node['server']}:{node['port']}{qs}#{name}"
     return ""
 
 
@@ -127,9 +135,14 @@ def _clash_proxy(node: dict) -> dict | None:
     if t == "ss":
         return {**base, "type": "ss", "cipher": node["cipher"], "password": node["password"], "udp": True}
     if t == "hysteria2":
-        return {**base, "type": "hysteria2", "password": node["password"],
-                "sni": node.get("sni", ""), "skip-cert-verify": node.get("insecure", False),
-                "obfs": node.get("obfs") or None, "obfs-password": node.get("obfs_password") or None}
+        p = {**base, "type": "hysteria2", "password": node["password"],
+             "sni": node.get("sni", ""), "skip-cert-verify": node.get("insecure", False)}
+        # 只在节点真的带 obfs 时输出键, 避免 clash 内核解析到 obfs: null
+        if node.get("obfs"):
+            p["obfs"] = node["obfs"]
+            if node.get("obfs_password"):
+                p["obfs-password"] = node["obfs_password"]
+        return p
     if t == "tuic":
         return {**base, "type": "tuic", "uuid": node["uuid"], "password": node["password"],
                 "sni": node.get("sni", ""), "congestion-controller": node.get("congestion_control", "bbr"),
@@ -180,8 +193,13 @@ def _singbox_outbound(node: dict) -> dict | None:
     if t == "ss":
         return {**base, "type": "shadowsocks", "method": node["cipher"], "password": node["password"]}
     if t == "hysteria2":
-        return {**base, "type": "hysteria2", "password": node["password"],
-                "tls": {"enabled": True, "server_name": node.get("sni", ""), "insecure": node.get("insecure", False)}}
+        ob = {**base, "type": "hysteria2", "password": node["password"],
+              "tls": {"enabled": True, "server_name": node.get("sni", ""), "insecure": node.get("insecure", False)}}
+        if node.get("obfs"):
+            # sing-box >= 1.9 的 obfs 配置块。丢了它, 开了混淆的节点在
+            # sing-box 系客户端(Karing 等)上握手直接失败。
+            ob["obfs"] = {"type": node["obfs"], "password": node.get("obfs_password", "")}
+        return ob
     if t == "tuic":
         return {**base, "type": "tuic", "uuid": node["uuid"], "password": node["password"],
                 "congestion_control": node.get("congestion_control", "bbr"),

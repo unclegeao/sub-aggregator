@@ -25,6 +25,12 @@ logger = logging.getLogger("sub_aggregator.liveness")
 DEFAULT_TIMEOUT = 2.0
 DEFAULT_MAX_WORKERS = 50
 
+# QUIC/UDP-only protocols: a TCP connect is the WRONG instrument for these.
+# A hysteria2 server bound to UDP-only (e.g. 443/UDP without a TCP listener)
+# fails every TCP probe even while perfectly alive, so probing them would
+# silently delete working nodes. They are passed through unchecked.
+UDP_ONLY_TYPES = ("hysteria2", "tuic")
+
 
 def _tcp_check(server: str, port: int, timeout: float) -> tuple[bool, float | None]:
     """Returns (alive, latency_ms). latency_ms is None when the check failed."""
@@ -56,17 +62,23 @@ def check_nodes_alive(
       name. Off by default since it permanently changes names shown in the
       client UI; opt in explicitly.
 
+    UDP-only protocols (see UDP_ONLY_TYPES) are never TCP-probed: they are
+    kept unconditionally with latency_ms=None and sort last.
+
     Returns (alive_nodes, dead_count). Nodes are shallow-copied before any
     mutation (annotation) so the caller's original list/dicts are untouched.
     """
     if not nodes:
         return [], 0
 
+    tcp_items = [(i, n) for i, n in enumerate(nodes) if n.get("type") not in UDP_ONLY_TYPES]
+    udp_alive = [dict(n, latency_ms=None) for n in nodes if n.get("type") in UDP_ONLY_TYPES]
+
     results: dict[int, tuple[bool, float | None]] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         future_to_idx = {
             pool.submit(_tcp_check, n.get("server"), n.get("port"), timeout): i
-            for i, n in enumerate(nodes)
+            for i, n in tcp_items
         }
         for future in concurrent.futures.as_completed(future_to_idx):
             idx = future_to_idx[future]
@@ -77,7 +89,7 @@ def check_nodes_alive(
                 results[idx] = (False, None)
 
     alive = []
-    for i, node in enumerate(nodes):
+    for i, node in tcp_items:
         is_alive, latency_ms = results.get(i, (False, None))
         if not is_alive:
             continue
@@ -86,6 +98,8 @@ def check_nodes_alive(
         if annotate_latency and latency_ms is not None:
             node["name"] = f"{node.get('name', node.get('server', ''))} [{round(latency_ms)}ms]"
         alive.append(node)
+
+    alive.extend(udp_alive)  # UDP nodes: kept, latency unknown (None sorts last)
 
     if sort_by_latency:
         alive.sort(key=lambda n: n.get("latency_ms") if n.get("latency_ms") is not None else float("inf"))

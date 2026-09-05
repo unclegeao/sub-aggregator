@@ -23,7 +23,7 @@ import base64
 import json
 import logging
 import re
-from urllib.parse import urlparse, parse_qs, unquote
+from urllib.parse import urlparse, unquote
 
 logger = logging.getLogger("sub_aggregator.parsers")
 
@@ -32,6 +32,35 @@ def _b64_decode(s: str) -> str:
     s = s.strip()
     padding = "=" * (-len(s) % 4)
     return base64.urlsafe_b64decode(s + padding).decode("utf-8", errors="replace")
+
+
+def _parse_query(query: str) -> dict:
+    """Parse URI query params keeping '+' as a literal character.
+
+    parse_qs() applies HTML-form rules and silently rewrites every '+' to a
+    space. Node URIs are not forms: hysteria2 obfs-passwords (and similar
+    random secrets) are base64-alphabet strings that legitimately contain
+    '+', and a mangled value fails the handshake with no visible error.
+   Manual split + unquote() keeps '+' intact.
+    """
+    params = {}
+    for pair in query.split("&"):
+        if not pair:
+            continue
+        key, sep, value = pair.partition("=")
+        if sep:
+            params.setdefault(unquote(key), unquote(value))
+    return params
+
+
+def _userinfo(value: str | None) -> str:
+    """Percent-decode a userinfo field (uuid/password) back to its raw form.
+
+    Many generators percent-encode special characters in passwords (e.g.
+    '+=' as '%2B%3D'); clash/sing-box consumers need the raw password, and
+    converters.py re-encodes when re-emitting URIs for v2rayN.
+    """
+    return unquote(value) if value else ""
 
 
 def _safe_int(v, default=443):
@@ -46,10 +75,10 @@ def parse_vless(uri: str) -> dict | None:
         parsed = urlparse(uri)
         if parsed.scheme != "vless":
             return None
-        uuid = parsed.username
+        uuid = _userinfo(parsed.username)
         server = parsed.hostname
         port = _safe_int(parsed.port)
-        qs = parse_qs(parsed.query)
+        qs = _parse_query(parsed.query)
         name = unquote(parsed.fragment) if parsed.fragment else server
         return {
             "type": "vless",
@@ -57,17 +86,17 @@ def parse_vless(uri: str) -> dict | None:
             "server": server,
             "port": port,
             "uuid": uuid,
-            "flow": qs.get("flow", [""])[0],
-            "encryption": qs.get("encryption", ["none"])[0],
-            "security": qs.get("security", ["none"])[0],
-            "sni": qs.get("sni", [""])[0],
-            "fp": qs.get("fp", [""])[0],
-            "pbk": qs.get("pbk", [""])[0],
-            "sid": qs.get("sid", [""])[0],
-            "type_net": qs.get("type", ["tcp"])[0],  # transport: tcp/ws/grpc/h2
-            "host": qs.get("host", [""])[0],
-            "path": qs.get("path", [""])[0],
-            "serviceName": qs.get("serviceName", [""])[0],
+            "flow": qs.get("flow", ""),
+            "encryption": qs.get("encryption", "none"),
+            "security": qs.get("security", "none"),
+            "sni": qs.get("sni", ""),
+            "fp": qs.get("fp", ""),
+            "pbk": qs.get("pbk", ""),
+            "sid": qs.get("sid", ""),
+            "type_net": qs.get("type", "tcp"),  # transport: tcp/ws/grpc/h2
+            "host": qs.get("host", ""),
+            "path": qs.get("path", ""),
+            "serviceName": qs.get("serviceName", ""),
         }
     except Exception:
         logger.debug("failed to parse vless uri", exc_info=True)
@@ -105,19 +134,19 @@ def parse_trojan(uri: str) -> dict | None:
         parsed = urlparse(uri)
         if parsed.scheme != "trojan":
             return None
-        qs = parse_qs(parsed.query)
+        qs = _parse_query(parsed.query)
         name = unquote(parsed.fragment) if parsed.fragment else parsed.hostname
         return {
             "type": "trojan",
             "name": name,
             "server": parsed.hostname,
             "port": _safe_int(parsed.port),
-            "password": parsed.username,
-            "sni": qs.get("sni", [""])[0],
-            "allowInsecure": qs.get("allowInsecure", ["0"])[0] in ("1", "true"),
-            "type_net": qs.get("type", ["tcp"])[0],
-            "host": qs.get("host", [""])[0],
-            "path": qs.get("path", [""])[0],
+            "password": _userinfo(parsed.username),
+            "sni": qs.get("sni", ""),
+            "allowInsecure": qs.get("allowInsecure", "0") in ("1", "true"),
+            "type_net": qs.get("type", "tcp"),
+            "host": qs.get("host", ""),
+            "path": qs.get("path", ""),
         }
     except Exception:
         logger.debug("failed to parse trojan uri", exc_info=True)
@@ -171,18 +200,18 @@ def parse_hysteria2(uri: str) -> dict | None:
         parsed = urlparse(uri)
         if parsed.scheme not in ("hysteria2", "hy2"):
             return None
-        qs = parse_qs(parsed.query)
+        qs = _parse_query(parsed.query)
         name = unquote(parsed.fragment) if parsed.fragment else parsed.hostname
         return {
             "type": "hysteria2",
             "name": name,
             "server": parsed.hostname,
             "port": _safe_int(parsed.port),
-            "password": parsed.username or "",
-            "sni": qs.get("sni", [""])[0],
-            "insecure": qs.get("insecure", ["0"])[0] in ("1", "true"),
-            "obfs": qs.get("obfs", [""])[0],
-            "obfs_password": qs.get("obfs-password", [""])[0],
+            "password": _userinfo(parsed.username),
+            "sni": qs.get("sni", ""),
+            "insecure": qs.get("insecure", "0") in ("1", "true"),
+            "obfs": qs.get("obfs", ""),
+            "obfs_password": qs.get("obfs-password", ""),
         }
     except Exception:
         logger.debug("failed to parse hysteria2 uri", exc_info=True)
@@ -194,10 +223,10 @@ def parse_tuic(uri: str) -> dict | None:
         parsed = urlparse(uri)
         if parsed.scheme != "tuic":
             return None
-        qs = parse_qs(parsed.query)
+        qs = _parse_query(parsed.query)
         name = unquote(parsed.fragment) if parsed.fragment else parsed.hostname
-        uuid = parsed.username or ""
-        password = parsed.password or ""
+        uuid = _userinfo(parsed.username)
+        password = _userinfo(parsed.password)
         return {
             "type": "tuic",
             "name": name,
@@ -205,11 +234,11 @@ def parse_tuic(uri: str) -> dict | None:
             "port": _safe_int(parsed.port),
             "uuid": uuid,
             "password": password,
-            "sni": qs.get("sni", [""])[0],
-            "alpn": qs.get("alpn", [""])[0],
-            "congestion_control": qs.get("congestion_control", ["bbr"])[0],
-            "udp_relay_mode": qs.get("udp_relay_mode", ["native"])[0],
-            "allow_insecure": qs.get("allow_insecure", ["0"])[0] in ("1", "true"),
+            "sni": qs.get("sni", ""),
+            "alpn": qs.get("alpn", ""),
+            "congestion_control": qs.get("congestion_control", "bbr"),
+            "udp_relay_mode": qs.get("udp_relay_mode", "native"),
+            "allow_insecure": qs.get("allow_insecure", "0") in ("1", "true"),
         }
     except Exception:
         logger.debug("failed to parse tuic uri", exc_info=True)
@@ -221,16 +250,16 @@ def parse_anytls(uri: str) -> dict | None:
         parsed = urlparse(uri)
         if parsed.scheme != "anytls":
             return None
-        qs = parse_qs(parsed.query)
+        qs = _parse_query(parsed.query)
         name = unquote(parsed.fragment) if parsed.fragment else parsed.hostname
         return {
             "type": "anytls",
             "name": name,
             "server": parsed.hostname,
             "port": _safe_int(parsed.port),
-            "password": parsed.username or "",
-            "sni": qs.get("sni", [""])[0],
-            "insecure": qs.get("insecure", ["0"])[0] in ("1", "true"),
+            "password": _userinfo(parsed.username),
+            "sni": qs.get("sni", ""),
+            "insecure": qs.get("insecure", "0") in ("1", "true"),
         }
     except Exception:
         logger.debug("failed to parse anytls uri", exc_info=True)
