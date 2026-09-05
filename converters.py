@@ -84,14 +84,23 @@ def _node_to_uri(node: dict) -> str:
         parts = []
         if node.get("sni"):
             parts.append(f"sni={node['sni']}")
+        if node.get("security"):
+            parts.append(f"security={node['security']}")
+        if node.get("alpn"):
+            parts.append(f"alpn={node['alpn']}")
         if node.get("obfs"):
             parts.append(f"obfs={node['obfs']}")
         if node.get("obfs_password"):
             # obfs-password is a random base64-alphabet string: percent-encode
             # it so '+' / '=' survive the URI round-trip (parsers.py unquotes).
             parts.append(f"obfs-password={quote(node['obfs_password'], safe='')}")
-        if node.get("insecure"):
-            parts.append("insecure=1")
+        # insecure/allowInsecure and pinSHA256 are mutually meaningful: when
+        # the server is cert-pinned (insecure=0) the pin MUST survive or the
+        # client can't validate the handshake -> connection times out. This
+        # was previously dropped entirely, which is the bug we're fixing.
+        parts.append("insecure=1" if node.get("insecure") else "insecure=0")
+        if node.get("pinSHA256"):
+            parts.append(f"pinSHA256={node['pinSHA256']}")
         qs = ("?" + "&".join(parts)) if parts else ""
         # password is already percent-decoded (parsers.py) -> re-encode it for
         # userinfo so reserved chars ('@', '#', '/', '+', '=') can't corrupt
@@ -154,6 +163,12 @@ def _clash_proxy(node: dict) -> dict | None:
     if t == "hysteria2":
         p = {**base, "type": "hysteria2", "password": node["password"],
              "sni": node.get("sni", ""), "skip-cert-verify": node.get("insecure", False)}
+        if node.get("alpn"):
+            p["alpn"] = [node["alpn"]]
+        # 证书指纹锁定: 没有它, 自签证书 + skip-cert-verify=false 的节点
+        # 在 clash 内核里握手校验必然失败, 表现为连接超时。
+        if node.get("pinSHA256"):
+            p["fingerprint"] = node["pinSHA256"]
         # 只在节点真的带 obfs 时输出键, 避免 clash 内核解析到 obfs: null
         if node.get("obfs"):
             p["obfs"] = node["obfs"]
@@ -212,6 +227,13 @@ def _singbox_outbound(node: dict) -> dict | None:
     if t == "hysteria2":
         ob = {**base, "type": "hysteria2", "password": node["password"],
               "tls": {"enabled": True, "server_name": node.get("sni", ""), "insecure": node.get("insecure", False)}}
+        if node.get("alpn"):
+            ob["tls"]["alpn"] = [node["alpn"]]
+        # NOTE: sing-box's hysteria2 tls block has no pinned-fingerprint
+        # (pinSHA256) equivalent -- it only supports full CA verification or
+        # `insecure`. A pinned self-signed node has no faithful sing-box
+        # representation; if `insecure` is also false here the node will
+        # fail cert verification on sing-box clients regardless.
         if node.get("obfs"):
             # sing-box >= 1.9 的 obfs 配置块。丢了它, 开了混淆的节点在
             # sing-box 系客户端(Karing 等)上握手直接失败。
