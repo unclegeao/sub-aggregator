@@ -208,16 +208,45 @@ def parse_hysteria2(uri: str) -> dict | None:
             return None
         qs = _parse_query(parsed.query)
         name = unquote(parsed.fragment) if parsed.fragment else parsed.hostname
+
+        # SNI: hysteria2 / Shadowrocket call it `peer`, sing-box/clash call it
+        # `sni`. Both are the TLS server-name and a missing value makes the
+        # handshake (and thus the whole connection) time out. Prefer `sni`,
+        # fall back to `peer`.
+        sni = qs.get("sni") or qs.get("peer") or ""
+
+        # obfs=@"none" or empty means "no obfuscation": keep it as "" so the
+        # Clash/sing-box renderers omit the obfs block entirely (emitting
+        # obfs: none makes clients try to handshake through a non-existent
+        # obfs layer and stall).
+        obfs = qs.get("obfs", "") or ""
+        if obfs.lower() in ("none", "disabled", "false", "0"):
+            obfs = ""
+
+        # Certificate-pinning fingerprint (Hysteria2 / Shadowrocket's
+        # pinSHA256). When the server is pinned (and insecure is off) this
+        # MUST survive the round-trip or the client can't validate the
+        # handshake and the whole connection times out. Accept the common
+        # aliases, keep whichever the source used.
+        pin_sha256 = (
+            qs.get("pinSHA256")
+            or qs.get("pin_sha256")
+            or qs.get("pinsha256")
+            or qs.get("pin")
+            or ""
+        )
+
         return {
             "type": "hysteria2",
             "name": name,
             "server": parsed.hostname,
             "port": _safe_int(parsed.port),
             "password": _userinfo(parsed.username),
-            "sni": qs.get("sni", ""),
+            "sni": sni,
             "insecure": qs.get("insecure", "0") in ("1", "true"),
-            "obfs": qs.get("obfs", ""),
-            "obfs_password": qs.get("obfs-password", ""),
+            "obfs": obfs,
+            "obfs_password": qs.get("obfs-password", "") if obfs else "",
+            "pinSHA256": pin_sha256,
         }
     except Exception:
         logger.debug("failed to parse hysteria2 uri", exc_info=True)
