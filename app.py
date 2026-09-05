@@ -430,6 +430,11 @@ def preferred_sub():
         port = int(request.args["port"]) if request.args.get("port") else None
     except ValueError:
         port = None
+    if port is not None and port not in preferred.CF_EDGE_PORTS:
+        return jsonify({
+            "error": f"port {port} 不是 Cloudflare 边缘监听的端口，替换 server 后必然连不上。"
+                     f"支持的端口: {sorted(preferred.CF_EDGE_PORTS)}",
+        }), 400
     try:
         max_n = int(request.args["max"]) if request.args.get("max") else 0
     except ValueError:
