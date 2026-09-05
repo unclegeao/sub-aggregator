@@ -29,7 +29,12 @@ def _dedup_key(node: dict) -> tuple:
     if t == "ss":
         return (t, server, port, node.get("cipher"), node.get("password"))
     if t == "hysteria2":
-        return (t, server, port, node.get("password"))
+        # obfs / obfs-password / sni all change the actual handshake path:
+        # two entries with the same server:port:password but different
+        # obfs mode (or sni) reach different backends, so they are NOT
+        # duplicates. Dropping them here silently deleted working nodes.
+        return (t, server, port, node.get("password"), node.get("obfs"),
+                node.get("obfs_password"), node.get("sni"))
     if t == "tuic":
         return (t, server, port, node.get("uuid"), node.get("password"))
     if t == "anytls":
