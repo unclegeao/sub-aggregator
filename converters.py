@@ -17,10 +17,27 @@ import yaml
 from regions import group_by_region
 
 
+def _host(server: str) -> str:
+    """Bracket-escape an IPv6 literal so it survives a URI round-trip.
+
+    urlparse() strips the brackets when handing us ``hostname``
+    (``[2001:db8::1]`` -> ``2001:db8::1``), so on the way back out we must
+    add them again. Without this, an IPv6 node re-serialized as
+    ``hysteria2://pw@2001:db8::1:443`` is unparseable -- the ':' runs are
+    indistinguishable, the whole URI fails, and the node is silently lost
+    out of the aggregated subscription.
+    """
+    s = (server or "").strip()
+    if ":" in s and not s.startswith("["):
+        return f"[{s}]"
+    return s
+
+
 def _node_to_uri(node: dict) -> str:
     """Re-serialize a normalized node back into its URI form for v2rayN."""
     t = node["type"]
     name = node.get("name", node.get("server", ""))
+    server = _host(node.get("server", ""))
     if t == "vless":
         # 必须保留 reality 的 pbk/sid、WS 的 host/path 等连接必需参数,
         # 否则 v2rayN 输出的是连不上的节点。type=tcp 是默认传输, 不写。
@@ -34,7 +51,7 @@ def _node_to_uri(node: dict) -> str:
         for url_key, v in params.items():
             if v:
                 qs += f"&{url_key}={v}"
-        return f"vless://{node['uuid']}@{node['server']}:{node['port']}?{qs}#{name}"
+        return f"vless://{node['uuid']}@{server}:{node['port']}?{qs}#{name}"
     if t == "vmess":
         payload = {
             "v": "2", "ps": name, "add": node["server"], "port": str(node["port"]),
@@ -50,19 +67,19 @@ def _node_to_uri(node: dict) -> str:
         parts = []
         if node.get("sni"):
             parts.append(f"sni={node['sni']}")
-        if node.get("type_net") and node["type_net"] != "tcp":
+        if node.get("type_net") and node.get("type_net") != "tcp":
             parts.append(f"type={node['type_net']}")
         if node.get("host"):
             parts.append(f"host={node['host']}")
         if node.get("path"):
             parts.append(f"path={node['path']}")
         qs = ("?" + "&".join(parts)) if parts else ""
-        return f"trojan://{quote(node['password'], safe='')}@{node['server']}:{node['port']}{qs}#{name}"
+        return f"trojan://{quote(node['password'], safe='')}@{server}:{node['port']}{qs}#{name}"
     if t == "ss":
         userinfo = base64.urlsafe_b64encode(
             f"{node['cipher']}:{node['password']}".encode()
         ).decode().rstrip("=")
-        return f"ss://{userinfo}@{node['server']}:{node['port']}#{name}"
+        return f"ss://{userinfo}@{server}:{node['port']}#{name}"
     if t in ("hysteria2",):
         parts = []
         if node.get("sni"):
@@ -80,7 +97,7 @@ def _node_to_uri(node: dict) -> str:
         # userinfo so reserved chars ('@', '#', '/', '+', '=') can't corrupt
         # the URI structure.
         pw = quote(node["password"], safe="")
-        return f"hysteria2://{pw}@{node['server']}:{node['port']}{qs}#{name}"
+        return f"hysteria2://{pw}@{server}:{node['port']}{qs}#{name}"
     if t == "tuic":
         parts = []
         if node.get("sni"):
@@ -94,7 +111,7 @@ def _node_to_uri(node: dict) -> str:
         if node.get("allow_insecure"):
             parts.append("allow_insecure=1")
         qs = ("?" + "&".join(parts)) if parts else ""
-        return f"tuic://{node['uuid']}:{quote(node['password'], safe='')}@{node['server']}:{node['port']}{qs}#{name}"
+        return f"tuic://{node['uuid']}:{quote(node['password'], safe='')}@{server}:{node['port']}{qs}#{name}"
     if t == "anytls":
         parts = []
         if node.get("sni"):
@@ -102,7 +119,7 @@ def _node_to_uri(node: dict) -> str:
         if node.get("insecure"):
             parts.append("insecure=1")
         qs = ("?" + "&".join(parts)) if parts else ""
-        return f"anytls://{quote(node['password'], safe='')}@{node['server']}:{node['port']}{qs}#{name}"
+        return f"anytls://{quote(node['password'], safe='')}@{server}:{node['port']}{qs}#{name}"
     return ""
 
 
